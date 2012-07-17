@@ -1,54 +1,106 @@
 #!/usr/bin/perl
 #
 # Copyright Eric Windisch, 2003.
-# Shadow improvements Copyright Nicholas Petreley, 2003
 # Licensed under the MIT license.
+# Modified by Nicholas Petreley, March 2003
+# Modified further by James Barron, June 2004
 #
 use strict;
 use Image::Magick;
 use Getopt::Long;
 use Config::IniFiles;
 
-my ($config_file, $path, $tmppath, $generator,$verbose, $inherits,$tmpscheme,$shadow, $opacity, $shadowx, $shadowy, $shadowblur,$shadowblursigma);
+sub shadow
+{
+	my($imageref, $swidth, $sheight, $shadowblur, $shadowblursigma, $shadowx, $shadowy, $shadowopacity) = @_;
+	my ($pre_shadow,$shadow_img,$resized);
+
+	$resized=Image::Magick->new(size=>$swidth."x".$sheight);
+	$resized->ReadImage('xc:transparent');
+	$resized->Set(type=>"TrueColorMatte");
+	$resized->Composite(image=>$$imageref,compose=>"Over");
+
+	#this is a template for making a shadow pixel by pixel
+	#basically, a black and white image to represent alpha channel.
+	$pre_shadow=$resized->Clone();
+	$pre_shadow->Separate(channel=>'Alpha');
+	$pre_shadow->GaussianBlur(radius=>$shadowblur,sigma=>$shadowblursigma);
+	$pre_shadow->Roll(x=>$shadowx,y=>$shadowy);
+	$pre_shadow->Negate();
+	$pre_shadow->Modulate(brightness=>$shadowopacity);
+
+	#prepare actual shadow image
+	$shadow_img=Image::Magick->new(size=>$swidth."x".$sheight);
+	$shadow_img->ReadImage('xc:black');
+	$shadow_img->Set(type=>"TrueColorMatte");
+	$shadow_img->Composite(compose=>'CopyOpacity',image=>$pre_shadow);
+
+	#compose image and shadow and write to file
+	$resized->Composite(image=>$shadow_img,compose=>'Difference');
+
+	return $resized;
+}
+
+my ($config_file, $path, $name, $tmppath, $generator, $verbose, $inherits, $tmpscheme, $shadow, $shadowopacity, $shadowx, $shadowy, $shadowblur, $shadowblursigma, $testinput, $testoutput);
 
 # default for variables
-$verbose=0;
+$verbose=1;
 $shadow=0;
-$opacity=100;
-$shadowx=2;
-$shadowy=3;
-$shadowblur=2;
-$shadowblursigma=1;
+$shadowopacity=40;
+$shadowx=6;
+$shadowy=6;
+$shadowblur=5;
+$shadowblursigma=3;
 $path="theme/";
 $tmppath="tmp/";
-$generator="/usr/bin/X11/xcursorgen";
+$generator="/usr/X11R6/bin/xcursorgen";
+$testinput="";
+$testoutput="test.png";
 # it seems that recursive inheritance does not yet exist.
-$inherits="whiteglass";
+$inherits="";
+
 
 sub process {
-	print <<EOF;
-Usage:
-$0 [-v] [--inherits theme] [--shadow] [--shadow-opacity percent] [--shadow-x pixels] [--shadow-y pixels] [--shadow-blur size] [--shadow-blur-sigma size] [--generator xcursorgen-path] [--tmp temp-dir]
-EOF
+	print "Usage:\n$0 [-v] [--name] [--inherits theme] [--shadow] [--shadow-x pixels] [--shadow-y pixels] [--shadow-blur size] [--shadow-blur-sigma size] [--shadow-opacity] [--generator xcursorgen-path] [--tmp temp-dir] [--input image] [--output image]";
 	exit 0;
 };
 
 GetOptions (
-	'inherits=s'=>\$inherits,
-	'tmp=s'=>\$tmppath,
-	'shadow'=>\$shadow,
-	'v'=>\$verbose,
-	'generator=s'=>\$generator,
-	'shadow-opacity=i'=>\$opacity,
-	'<>' => \&process,
-	'help'=>\&process,
-	'shadow-x=i'=>\$shadowx,
-	'shadow-y=i'=>\$shadowy,
-	'shadow-blur=i'=>\$shadowblur,
-	'shadow-blur-sigma=i'=>\$shadowblursigma
+'name=s'=>\$name,
+'inherits=s'=>\$inherits,
+'tmp=s'=>\$tmppath,
+'shadow'=>\$shadow,
+'v'=>\$verbose,
+'generator=s'=>\$generator,
+'<>' => \&process,
+'help'=>\&process,
+'shadow-x=i'=>\$shadowx,
+'shadow-y=i'=>\$shadowy,
+'shadow-blur=i'=>\$shadowblur,
+'shadow-blur-sigma=i'=>\$shadowblursigma,
+'shadow-opacity=i'=>\$shadowopacity,
+'input=s'=>\$testinput,
+'output=s'=>\$testoutput
 );
 
-$opacity-=100;
+if($name ne "")
+{
+	$path=$name . "/";
+}
+
+if($testinput ne "")
+{
+	my($image,$yoffset,$xoffset,$swidth,$sheight);
+	$image=Image::Magick->new;
+	$image->Read($testinput);
+	$swidth = $image->Get('width') + $shadowx + $shadowblur;
+	$sheight = $image->Get('height') + $shadowy + $shadowblur;
+	$image=shadow(\$image, $swidth, $sheight, $shadowblur, $shadowblursigma, $shadowx, $shadowy, $shadowopacity);
+	$image->Write(filename=>$testoutput);
+
+	exit();
+}
+	
 
 # make sure path and tmppath end in /
 if ($path =~ /[^\/]$/) {
@@ -85,21 +137,21 @@ my $cfg=new Config::IniFiles(-file=>$tmpscheme) or die ("Scheme.ini in wrong for
 my @sections=$cfg->Sections;
 
 my $filemap={
-	Arrow=>["left_ptr","X_cursor","right_ptr",'4498f0e0c1937ffe01fd06f973665830'],
-	Cross=>["tcross","cross"],
-	Hand=>["hand1", "hand2",'9d800788f1b08800ae810202380a0822','e29285e634086352946a0e7090d73106'],
+	Arrow=>["left_ptr","X_cursor","right_ptr","top_left_arrow","move",'4498f0e0c1937ffe01fd06f973665830'],
+	Cross=>["tcross","cross","crosshair","cross_reverse","draped_box"],
+	Hand=>["hand","hand1", "hand2",'9d800788f1b08800ae810202380a0822','e29285e634086352946a0e7090d73106'],
 	IBeam=>"xterm",
 	UpArrow=>"center_ptr",
-	SizeNWSE=>["bottom_right_corner","top_left_corner",'c7088f0f3e6c8088236ef8e1e3e70000'],
-	SizeNESW=>["bottom_left_corner","top_right_corner",'fcf1c3c7cd4491d801f1e1c78f100000'],
-	SizeWE=>["sb_h_double_arrow", "left_side", "right_side",'028006030e0e7ebffc7f7070c0600140'],
-	SizeNS=>["double_arrow","bottom_side","top_side",'00008160000006810000408080010102'],
+	SizeNWSE=>["bottom_right_corner","top_left_corner","bd_double_arrow","lr_angle",'c7088f0f3e6c8088236ef8e1e3e70000'],
+	SizeNESW=>["bottom_left_corner","top_right_corner","fd_double_arrow","ll_angle",'fcf1c3c7cd4491d801f1e1c78f100000'],
+	SizeWE=>["sb_h_double_arrow", "left_side", "right_side","h_double_arrow",'028006030e0e7ebffc7f7070c0600140','14fef782d02440884392942c11205230'],
+	SizeNS=>["double_arrow","bottom_side","top_side","v_double_arrow","sb_v_double_arrow",'00008160000006810000408080010102','2870a09082c103050810ffdffffe0204'],
 	Help=>["question_arrow",'d9ce0ab605698f320427677b458ad60b'],
 	Handwriting=>"pencil",
-	AppStarting=>["left_ptr_watch", '3ecb610c1bf2410f44200f48c40d3599'],
+	AppStarting=>["left_ptr_watch", '08e8e1c95fe2fc01f976f1e063a24ccd', '3ecb610c1bf2410f44200f48c40d3599'],
 	SizeAll=>"fleur",
 	Wait=>"watch",
-	NO=>"03b6e0fcb3499374a867c041f52298f0"
+	NO=>["crossed_circle",'03b6e0fcb3499374a867c041f52298f0']
 };
 
 foreach my $section (@sections) {
@@ -116,7 +168,7 @@ foreach my $section (@sections) {
 	$x=$image->Read($filename);
 	warn "$x" if "$x";
 
-        $frames=$cfg->val($section, 'Frames');
+	$frames=$cfg->val($section, 'Frames');
 	$width=$image->Get('width')/$frames;
 	$height=$image->Get('height');
 
@@ -132,7 +184,7 @@ foreach my $section (@sections) {
 	};
 	unless ($@) {
 		$array=0;
-	} 
+	}
 
 	LOOP:
 	my $outfile;
@@ -154,11 +206,10 @@ foreach my $section (@sections) {
 
 	open (FH, "| $generator > \"$outfile\"");
 
-        my $yoffset = $shadowy + $shadowblur;
+	my $yoffset = $shadowy + $shadowblur;
 	my $xoffset = $shadowx + $shadowblur;
 	my $swidth = $width + $xoffset;
 	my $sheight = $height + $yoffset;
-
 	for (my $i=0; $i<$frames; $i++) {
 		my ($tmpimg, $outfile);
 		$outfile=$tmppath.$section.'-'.$i.'.png';
@@ -167,46 +218,19 @@ foreach my $section (@sections) {
 		$x=$tmpimg->Crop(width=>$width, height=>$height, x=>$i*$width, y=>0);
 		warn "$x" if "$x";
 
-		if ($shadow) {
-			my $blank = Image::Magick->new;
-			$blank->Set(size=>$swidth."x".$sheight);
-			$blank->ReadImage('xc:transparent');
-			$blank->Set(type=>"TrueColorMatte");
-			$blank->Quantize(colorspace=>"RGB");
-			$blank->Colorize(fill=>"black",opacity=>0);
-			$blank->Transparent(color=>"black");
-			my $blankcanvas=$blank->Clone();
-
-			$x=$blankcanvas->Composite(image=>$tmpimg, compose=>"CopyOpacity", x=>0, y=>0, opacity=>0);
-			warn "$x" if "$x";
-
-			# copy opacity of tmpimg to blank, moving it down
-			$x=$blankcanvas->Composite(image=>$tmpimg, compose=>"CopyOpacity", x=>$shadowx, y=>$shadowy, opacity=>0);
-			warn "$x" if "$x";
-
-			# apply blankcanvas to blank with opacity
-			$x=$blank->Composite(image=>$blankcanvas, compose=>"CopyOpacity", x=>0, y=>0, opacity=>$opacity);
-			warn "$x" if "$x";
-
-			# blur
-			$x=$blank->Blur(radius=>$shadowblur, sigma=>$shadowblursigma);
-			warn "$x" if "$x";
-
-			# layer tmpimg on blank
-			$x=$blank->Composite(image=>$tmpimg, compose=>"Over", x=>0, y=>0, opacity=>0);
-			warn "$x" if "$x";
-
-			$tmpimg=$blank;
+		if ($shadow)
+		{
+			$tmpimg=shadow(\$tmpimg, $swidth, $sheight, $shadowblur, $shadowblursigma, $shadowx, $shadowy, $shadowopacity);
 		}
 
 		$x=$tmpimg->Write($outfile);
 		warn "$x" if "$x";
 
 		print FH "1 ".
-			$cfg->val($section,'Hot spot x')." ".
-			$cfg->val($section,'Hot spot y')." ".
-			$outfile." ".
-			$cfg->val($section,'Interval')."\n";
+		$cfg->val($section,'Hot spot x')." ".
+		$cfg->val($section,'Hot spot y')." ".
+		$outfile." ".
+		$cfg->val($section,'Interval')."\n";
 	}
 
 	if ($array > -1) {
