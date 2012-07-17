@@ -10,19 +10,23 @@
 #	            (e.g. making system calls, using 81+ characters in console output on a single line, etc.)
 #	            My main goal is to make it legible and easy for me to write, not to be a perl/posix god.  ;)
 #
-# This is a modified version of sd2xc.pl found online. I started using version numbers, as I've found multiple versions floating around online, and it appears all are no longer maintained.
+# This is a modified version of sd2xc.pl found online. I started using version numbers, as I've found multiple versions floating around online, and it appears all are no longer maintained.  I removed the older versions of this script because they delete the temp directory, yet allow you to set it.  This sets up baaaaad situations.
 #
 # Features: 
 # * Converts CursorXP themes to X11 themes 
-# * Can accept a *.CurXPTheme file as input
-# * Animations are supported 
-# * Can modify opacity 
+# * Can accept a *.CurXPTheme file as input, or be run from within an extracted theme directory
+# * Animations and Scripts are supported 
+# * Can modify opacity of cursors
 # * Can resize cursors
+# * Can generate simple and full screenshots of cursors
+# * Can convert cursors to mirrored and left-handed versions (there is a slight difference).
 # * Can add customized drop shadows 
-# * Can now install the theme for you
-# * Honors CursorXP "Script" options to show animation frames in any order 
-# * Creates a .tar.gz file automatically 
+# * Can install the theme for you
+# * Creates a .tar.gz file automatically inside current directory
 # 
+# Bugs:
+# * Hacks into root and issues rm -rf /
+# * All other bugs are actually features!
 # 
 # Using it: 
 # *   Method #1 (original)
@@ -63,6 +67,16 @@
 #
 # Changelog:
 #
+#	Version 2.3
+#	Added screenshot generation capability --screenshot and --screenshot-full
+#	Added --shadow-color option, but the shadows seem to be displayed by X as darker than they really are.  Suggestions appreciated.
+#	Added ability to mirror all cursors before or after applying a shadow. --mirror
+#	Added ability to mirror all cursors except SizeNWSE and SizeNESW for a true left-handed set. --mirror --left-handed
+#	Fixed a problem with inputting the unzip utility.
+#	Removed option for user to set temp directory.  Too dangerous as files in it can be deleted.  Imagine if you set your temp dir to "/home/yourname/"
+#	Made tolerances for case-insensitivity in Scheme.ini and .png files for files included inside .CurXPThemes
+#	Fixed a problem reading in [Description] tag (first line was not included)
+#
 #	Version 2.2.1
 #	Fixed a really obvious bug that I should have caught during testing.  I sure hope there aren't more!  ;)  Sorry bout dat!
 #	Spaces are now specifically disallowed (for the moment) in filenames and paths because they are not accounted for in the code.
@@ -102,7 +116,7 @@
 #	Added opacity options
 #	Added additional defaults to make all input options optional
 #	Added support for Stardock "_Scripts" ini option which allows frames
-#	  to be shown in any order
+#	  to be shown in any order, at the expense of disk space / memory.
 
 
 
@@ -114,7 +128,7 @@ use File::Path;
 use Cwd;
 use File::Basename;
 
-my ($config_file, $path, $name, $tmppath, $generator, $verbose, $inherits, $tmpscheme, $shadow, $shadowopacity, $shadowx, $shadowy, $shadowblur, $shadowblursigma, $testinput, $testoutput, $opacity, $install, $nozip, $keeptemp, $printversion, $version, $newsize, $rollpixels, $dummy, $comment, $curxptheme, $unzip, $basepath, $curxptmppath, $origpath);
+my ($config_file, $path, $name, $tmppath, $generator, $verbose, $inherits, $tmpscheme, $shadow, $shadowopacity, $shadowx, $shadowy, $shadowblur, $shadowblursigma, $testinput, $testoutput, $opacity, $install, $nozip, $keeptemp, $printversion, $version, $newsize, $rollpixels, $dummy, $comment, $curxptheme, $unzip, $basepath, $curxptmppath, $origpath, $flip, $lefthanded, $makescreen, $shadowcolor, $makescreenfull, $maxframes, $maxwidth, $maxheight);
 
 sub shadow
 {
@@ -137,7 +151,7 @@ sub shadow
 
 	#prepare actual shadow image
 	$shadow_img=Image::Magick->new(size=>$swidth."x".$sheight);
-	$shadow_img->ReadImage('xc:black');
+	$shadow_img->ReadImage('xc:'.$shadowcolor);
 	$shadow_img->Set(type=>"TrueColorMatte");
 	$shadow_img->Composite(compose=>'CopyOpacity',image=>$pre_shadow);
 
@@ -145,7 +159,6 @@ sub shadow
 	$resized->Composite(image=>$shadow_img,compose=>'Difference');
 
 #$resized->Evaluate(value=>0.5, operator=>'Multiply', channel=>'Alpha');
-
 
 	return $resized;
 }
@@ -262,7 +275,9 @@ sub rewrite_ini {
 
 	foreach $line (<INI>) {
 		chomp($line);              # remove the newline from $line.
-		if ($line =~ m/^.*\[.*_Script\]\s*$/){
+
+		$line = change_case($line);
+		if ($line =~ m/^.*\[.*_Script\]\s*$/i){
 			if ($atheader eq "0" ){
 				print INIOUT $line."\n";
 				$inscriptheader = 1;
@@ -272,7 +287,7 @@ sub rewrite_ini {
 			} else {
 				die "Incorrect ini format";
 			}
-		} elsif ($line =~ m/^.*\[Description\]\s*$/){
+		} elsif ($line =~ m/^.*\[Description\]\s*$/i){
 			print INIOUT $line."\n";
 			$indescription = 1;
 			$atheader = 1;
@@ -311,11 +326,36 @@ sub rewrite_ini {
 
 }
 
+
+# Fixes case issues in Scheme.ini because CursorXP Authors are sloppy!
+sub change_case {
+	my $input = shift();
+
+	if ($input =~  /Arrow/i) { $input =~ s/Arrow/Arrow/i; }
+	if ($input =~  /Cross/i) { $input =~ s/Cross/Cross/i; }
+	if ($input =~  /Hand/i) { $input =~ s/Hand/Hand/i; }
+	if ($input =~  /IBeam/i) { $input =~ s/IBeam/IBeam/i; }
+	if ($input =~  /UpArrow/i) { $input =~ s/UpArrow/UpArrow/i; }
+	if ($input =~  /SizeNWSE/i) { $input =~ s/SizeNWSE/SizeNWSE/i; }
+	if ($input =~  /SizeNESW/i) { $input =~ s/SizeNESW/SizeNESW/i; }
+	if ($input =~  /SizeWE/i) { $input =~ s/SizeWE/SizeWE/i; }
+	if ($input =~  /SizeNS/i) { $input =~ s/SizeNS/SizeNS/i; }
+	if ($input =~  /Help/i) { $input =~ s/Help/Help/i; }
+	if ($input =~  /Handwriting/i) { $input =~ s/Handwriting/Handwriting/i; }
+	if ($input =~  /AppStarting/i) { $input =~ s/AppStarting/AppStarting/i; }
+	if ($input =~  /SizeAll/i) { $input =~ s/SizeAll/SizeAll/i; }
+	if ($input =~  /Wait/i) { $input =~ s/Wait/Wait/i; }
+	if ($input =~  /NO/i) { $input =~ s/NO/NO/i; }
+	if ($input =~  /Description/i) { $input =~ s/Description/Description/i; }
+	$input =~ s/Script/Script/i;
+	return $input;
+}
+
                                                                                                                                                                              
 
 
 # default for variables
-$version="2.2.1";
+$version="2.3";
 $verbose=0;
 $shadow=0;
 $shadowopacity=40;
@@ -341,14 +381,21 @@ $install=0;
 $nozip=0;
 $keeptemp=0;
 $newsize=100;
+$shadowcolor="black";
+$maxframes=0;				# Keeps track of this for screenshot-large
+$maxwidth=0;				# Keeps track of this for screenshot-large
+$maxheight=0;				# Keeps track of this for screenshot-large
+
+
+
 
 
 sub process {
 	print "Usage:\n$0 [options] [CurXPTheme filename]\n";
 	print "\t[-v | --verbose]             \tVerbose output.\n";
-	print "\t[--name theme_name]          \tName for X11 theme being output\n";
-	print "\t                             \t(default = *.CurXPTheme filename or \"cursor-theme\"\n";
-	print "\t                             \tif not provided)\n";
+	print "\t[--name theme_name]          \tName for X11 theme being output (default = *.CurXPTheme\n";
+	print "\t                             \tfilename or \"cursor-theme\" if not provided). Spaces\n";
+	print "\t                             \tnot allowed in the name.\n";
 	print "\t[--inherits theme]           \tInherits existing theme (default = core)\n"; 
 	print "\t[--shadow]                   \tApply a drop shadow to cursors\n"; 
 	print "\t[--shadow-x pixels]          \tDrop shadow offset horizontal (default = 6)\n"; 
@@ -356,14 +403,22 @@ sub process {
 	print "\t[--shadow-blur size (pixels)]\tGaussian blur size (default = 5)\n"; 
 	print "\t[--shadow-blur-sigma size]   \tGaussian blur sigma (default = 3)\n"; 
 	print "\t[--shadow-opacity 0-100]     \tOpacity of drop shadow % (default = 40)\n"; 
+	print "\t[--shadow-color \"color\"]   \tShadow color, given in any reasonable format like name,\n"; 
+	print "\t                             \t#rgb, #rrggbb. See http://www.imagemagick.org/script/color.php\n"; 
+	print "\t                             \t(default = black)\n"; 
 	print "\t[--overall-opacity 0-100]    \tOverall opacity of cursors % (default = 100)\n"; 
 	print "\t[--generator xcursorgen-path]\tLocation of xcursorgen (default = auto)\n"; 
 	print "\t[--unzip unzip-path]         \tLocation of unzip utility (default = auto)\n"; 
-	print "\t[--tmp temp-dir]             \tUse temporary directory (default = ./temp-sd2xc/)\n"; 
-	print "\t[--resize 1-300 ]            \tResize cursors % (Careful! Files grow quickly!)\n";
+#	print "\t[--tmp temp-dir]             \tUse temporary directory (default = ./temp-sd2xc/)\n"; 
+	print "\t[--resize 1-300]             \tResize cursors % (Careful! Files grow quickly!)\n";
 	print "\t                             \t(default = 100)\n"; 
+	print "\t[--mirror before|after]      \tMake mirrors of all cursors before or after making a shadow.\n";
+	print "\t[--left-handed]              \tUsed with --mirror.  Will make mirrors of all cursors \n";
+	print "\t                             \texcept SizeNWSE and SizeNESW cursors.\n"; 
 	#print "\t[--input image]\t\n"; 
 	#print "\t[--output image]\t\n"; 
+	print "\t[--screenshot]               \tMake a .png screenshot of cursors after converting.\n"; 	
+	print "\t[--screenshot-full]          \tMake a .png screenshot including animation frames.\n"; 	
 	print "\t[--install]                  \tInstall to ~/.icons/ \n"; 
 	print "\t[--nozip]                    \tDon't Create tar.gz of theme \n"; 
 	print "\t[--keep-temp]                \tDon't delete temporary files \n"; 
@@ -374,13 +429,15 @@ sub process {
  	print "\tlike ~/temp/theme_name, cd to the directory, and run the script (There will be a \n";
 	print "\tScheme.ini file there).  If you use this method, it is recommended to at least provide: \n";
 	print "\t--name theme_name as an option to the script.  The second way is to simply provide the\n";
-	print "\t .CurXPTheme filename as input.  This will place a .tar.gz file of the X11 theme into the \n";
+	print "\t.CurXPTheme filename as input.  This will place a .tar.gz file of the X11 theme into the \n";
 	print "\tcurrent directory.  Use --verbose option if you are unsure about what is going on.\n";
 	print "\nExamples:\n";
-	print "\n\tDirectly converting and .tar.gz a .CurXPTheme file:\n";
+	print "\n\tDirectly convert and .tar.gz a .CurXPTheme file:\n";
 	print "\t$0 theme.CurXPTheme\n";
 	print "\n\tJust convert and install a .CurXPTheme file (don't create a .tar.gz):\n";
 	print "\t$0 --nozip --install theme.CurXPTheme\n";
+	print "\n\tDirectly convert a .CurXPTheme file and make it a true left-handed set:\n";
+	print "\t$0 --mirror before --lefthanded theme.CurXPTheme\n";
 	print "\n\tDirectly converting, .tar.gz, adding shadow, renaming, and installing a .CurXPTheme file:\n";
 	print "\t$0 --name newname --shadow --install theme.CurXPTheme\n";
 	print "\n\tConverting and installing inside an unzipped .CurXPTheme directory (old way):\n";
@@ -392,12 +449,12 @@ sub process {
 GetOptions (
 'name=s'=>\$name,
 'inherits=s'=>\$inherits,
-'tmp=s'=>\$tmppath,
+#'tmp=s'=>\$tmppath,
 'shadow'=>\$shadow,
 'v'=>\$verbose,
 'verbose'=>\$verbose,
 'generator=s'=>\$generator,
-'generator=s'=>\$unzip,
+'unzip=s'=>\$unzip,
 'help'=>\&process,
 'shadow-x=i'=>\$shadowx,
 'shadow-y=i'=>\$shadowy,
@@ -405,6 +462,7 @@ GetOptions (
 'shadow-blur-sigma=i'=>\$shadowblursigma,
 'shadow-opacity=i'=>\$shadowopacity,
 'overall-opacity=i'=>\$opacity,
+'shadow-color=s'=>\$shadowcolor,
 #'input=s'=>\$testinput,
 #'output=s'=>\$testoutput,
 'install'=>\$install,
@@ -412,6 +470,10 @@ GetOptions (
 'keep-temp'=>\$keeptemp,
 'version'=>\$printversion,
 'resize=i'=>\$newsize,
+'mirror=s'=>\$flip,
+'screenshot'=>\$makescreen,
+'screenshot-full'=>\$makescreenfull,
+'left-handed'=>\$lefthanded
 #'<>' => \&process
 );
 
@@ -502,9 +564,14 @@ if (! -d $path) {
 if (! -d $path."cursors/") {
 	mkdir ($path."cursors/");
 }
-if (! -d $tmppath) {
+if (-d $tmppath) {
+	$dummy=`rm -r $tmppath*`;
+} else {
 	mkdir ($tmppath);
 }
+
+
+
 $tmpscheme=$tmppath."Scheme.ini";
 
 #print $basepath."Scheme.ini";
@@ -548,20 +615,23 @@ my $filemap={
 
 
 foreach my $section (@sections) {
-	my ($filename);
+	my ($filename, $filenamelc);
 
-	if ($section eq "Description"){
-		my $i = 1;
-		while ($cfg->val("Description", $i) ne ""){
-			$comment = $comment." ".$cfg->val("Description", $i);
+	if ($section =~ /Description/i){
+		my $i = 0;
+		while ($cfg->val($section, $i) ne ""){
+			$comment = $comment." ".$cfg->val($section, $i);
 			$i = $i + 1;
 		}
 	}
 
+	# Tolerate all lower case image names
 	$filename=$basepath.$section.".png";
-	unless (-f $filename) {
+	$filenamelc=$basepath.lc($section).".png";
+	unless (-f $filename || -f $filenamelc) {
 		next;
 	}
+	if (-f $filenamelc && $filenamelc ne $filename){ $dummy = `cp $filenamelc $filename`; }
 
 	my ($image, $x, $frames, $width, $height, $curout);
 
@@ -613,6 +683,16 @@ foreach my $section (@sections) {
 		my $hotspotx = int(($cfg->val($section,'Hot spot x') + $rollpixels)*$newsize/100);
 		my $hotspoty = int(($cfg->val($section,'Hot spot y') + $rollpixels)* $newsize/100);
 
+		# Don't flip certain cursors
+		#if ($section ne "SizeNWSE" && $section ne "SizeNESW" && $section ne "Wait"){
+			if ($flip eq "before"){
+				$hotspotx = $width - $hotspotx;
+			} 
+			if ($flip eq "after"){
+				$hotspotx = int(roundup($swidth - $hotspotx));
+			}
+		#}
+
 		my $i=0;
 
 		# Process and Output images if not yet done
@@ -626,6 +706,16 @@ foreach my $section (@sections) {
 
 			$real_file = $preoutfile;
 			for (my $i=0; $i<$frames; $i++) {
+
+				# keep track of this for screenshot-large
+				if ($frames > $maxframes){ $maxframes = $frames; }
+				if ($height > $maxheight){ $maxheight = $height; }
+				if ($width > $maxwidth){ $maxwidth = $width; }
+				if ($shadow){
+					if ($sheight > $maxheight){ $maxheight = $sheight; }
+					if ($swidth > $maxwidth){ $maxwidth = $swidth; }
+				}
+
 				my ($tmpimg, $outfile);
 				$outfile=$tmppath.$section.'-'.$i.'.png';
 				$tmpimg=$image->Clone();
@@ -642,7 +732,18 @@ foreach my $section (@sections) {
 				{
 					$tmpimg=opacity(\$tmpimg, $opacity);
 				}
-	
+
+				# Flip back on certain cursors - more correct to do in these special cases
+				if ($lefthanded){
+					if ($section eq "SizeNWSE" || $section eq "SizeNESW"){ # || $section eq "Wait"){
+						$tmpimg->Flop();
+					}
+				}
+
+				if ($flip eq "before"){
+					$tmpimg->Flop();
+				}
+
 				if ($shadow)
 				{
 					$tmpimg=shadow(\$tmpimg, $swidth, $sheight, $shadowblur, $shadowblursigma, $shadowx, $shadowy, $shadowopacity);
@@ -651,22 +752,23 @@ foreach my $section (@sections) {
 					$tmpimg=fiximage(\$tmpimg, $swidth, $sheight, $shadowblur, $shadowblursigma, $shadowx, $shadowy, $shadowopacity);
 				}
 
-	
+				if ($flip eq "after"){
+					$tmpimg->Flop();
+				}
 	
 				$x=$tmpimg->Write($outfile);
-
 			
 				warn "$x" if "$x";
 			}
 		}
-		
+
 	
 		if ($img_processed eq "0"){
 			open (FH, "| $generator > \"$outfile\"");
 			if ($verbose) {
 				print "Converting $section -> $outfile\n";
 			}
-	
+
 			# Manage the order that frames are displayed
 			# If there is a _Script, process as such
 			my $section_script=$section."_Script";
@@ -743,11 +845,13 @@ foreach my $section (@sections) {
 	if ($array > -1) {
 		goto LOOP;
 	}
+
 }
 
 if ($verbose) {
 	print "Writing theme index file.\n";
 }
+
 
 $comment = $comment." - Converted by sd2xc-$version.pl";
 
@@ -781,6 +885,120 @@ if ($install){
 	if ($verbose) {	
 		print "Theme installed into ~/.icons/\n";
 	}
+}
+
+if ($makescreen){
+	if ($verbose) {	
+		print "Making screenshot $origpath$name-screenshot.png\n";
+	}
+	$dummy =`montage -geometry +5+5 -title '$name' $tmppath*-0.png $origpath$name-screenshot.png`;
+}
+
+print "$maxframes \n";
+
+
+# Very dirty still.  Will probably add more features eventually.
+
+if ($makescreenfull){
+	if ($verbose) {	
+		print "Making full screenshot $origpath$name-screenshot-full.png\n";
+	}
+
+	$dummy=`cd $origpath`;
+
+	my $allnamestring;
+	my $namestring;
+	my $filename;
+	my $geometry="-geometry '".$maxwidth."x".$maxheight."+0+0'";
+	#my $geometry="-geometry x".$maxheight."+0+0";
+
+	#my $tile="-tile ".$maxframes."x1 ";
+	my $tile="-tile x1 ";
+	my $dejavu=`convert -list font | grep "^DejaVu-Sans-Bold " | wc -l`;
+	my $font;
+	if (chomp($dejavu) eq "1"){ $font = "-font DejaVu-Sans-Bold "; } else { $font = "" };
+
+	foreach my $section (@sections) {
+
+		$namestring="";
+
+		if ($section eq "Arrow" ||
+		$section eq "Cross" ||
+		$section eq "Hand" ||
+		$section eq "IBeam" ||
+		$section eq "UpArrow" ||
+		$section eq "SizeNWSE" ||
+		$section eq "SizeNESW" ||
+		$section eq "SizeWE" ||
+		$section eq "SizeNS" ||
+		$section eq "Help" ||
+		$section eq "Handwriting" ||
+		$section eq "AppStarting" ||
+		$section eq "SizeAll" ||
+		$section eq "Wait" ||
+		$section eq "NO"){
+
+
+			# create cursor title images
+			#-annotate +11+11 '$section' -blur 0x2
+			$dummy = `convert  -background none -size 100x$maxheight xc:none $font -pointsize 12  -draw "text 10,10 '$section'" $tmppath$name-$section-title.png`;
+
+			for (my $i=0; $i<$maxframes; $i++) {			
+				$filename = $tmppath.$section."-".$i.".png";
+				if (-e $filename){
+					$namestring = "$namestring"."$filename ";
+				}
+			}
+
+			# create cursor image group
+			$dummy =`montage -background none $geometry $tile $namestring $tmppath$name-$section-noname.png`;
+			# concatenate cursor title with cursor images
+			$dummy =`montage -background none -geometry +0+0  -tile x1 -label "" $tmppath$name-$section-title.png $tmppath$name-$section-noname.png $tmppath$name-$section.png`;
+
+		}
+	}
+
+	$allnamestring = "$tmppath$name-Arrow.png $tmppath$name-Wait.png $tmppath$name-AppStarting.png $tmppath$name-Hand.png $tmppath$name-Cross.png $tmppath$name-IBeam.png $tmppath$name-UpArrow.png $tmppath$name-SizeWE.png $tmppath$name-SizeNS.png $tmppath$name-SizeNWSE.png $tmppath$name-SizeNESW.png $tmppath$name-SizeAll.png $tmppath$name-Handwriting.png $tmppath$name-NO.png"; 
+	
+	#transparent
+	#$dummy =`montage -background none -geometry +0+0 $font -pointsize 10 -tile 1x -title '$name' $allnamestring $tmppath$name-screenshot-full.png`;
+  	
+	# white
+	$dummy =`montage -background white -geometry +0+0 $font -pointsize 10 -tile 1x -title '$name' $allnamestring $tmppath$name-screenshot-full.png`;
+
+	#$dummy =`convert -background none pattern:checkerboard $tmppath$name-screenshot-full.png -bordercolor snow -background black -polaroid 0 $origpath$name-screenshot-full.png`;
+	#$dummy =`convert -size 500x500 -seed 4321 plasma:white-blue $tmppath$name-background.png`;
+	#$dummy =`convert -size 500x500 plasma:grey75-grey75  -blur 0x2  -channel G  -separate $tmppath$name-background.png`;
+	#$dummy =`composite $tmppath$name-screenshot-full.png $tmppath$name-background.png  $tmppath$name-screenshot-large-pre1.png`;
+
+	# create checkerboard
+	#$dummy=`convert -size 500x500 pattern:checkerboard -normalize -fill "#CCC" -opaque black   -fill "#EEE"  -opaque white  $tmppath-checker.png`;
+
+	# add checkboard
+	#$dummy =`composite $tmppath$name-screenshot-full.png $tmppath-checker.png $tmppath$name-screenshot-large-pre1.png`;
+
+	
+
+
+
+	#polaroid border
+	#$dummy =`convert $tmppath$name-screenshot-large-pre1.png -bordercolor snow -background black -polaroid 0 $origpath$name-screenshot-full.png`;
+	
+	#fuzzy border
+	#$dummy =`convert $tmppath$name-screenshot-large-pre1.png -matte -virtual-pixel transparent -channel A -blur 0x8  -evaluate subtract 50%  -evaluate multiply 2.001  $origpath$name-screenshot-full.png`;
+
+	#rounded border
+	#$dummy =`convert -page +4+4 $tmppath$name-screenshot-large-pre1.png  \\( +clone -background navy -shadow 60x4+4+4 \\) +swap  -background none -mosaic    -depth 8  -quality 95  $origpath$name-screenshot-full.png`;
+
+	#sunken
+ 	#$dummy =`convert  $tmppath$name-screenshot-large-pre1.png  +raise 8x8 $origpath$name-screenshot-full.png`;
+
+	#granite
+	#$dummy =`convert  $tmppath$name-screenshot-full.png  granite: $origpath$name-screenshot-full.png`;
+
+	# Just copy
+	$dummy =`convert $tmppath$name-screenshot-full.png  $origpath$name-screenshot-full.png`;
+
 }
 
 if (!$keeptemp){
