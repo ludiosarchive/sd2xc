@@ -4,9 +4,87 @@
 # Licensed under the MIT license.
 # Modified by Nicholas Petreley, March 2003
 # Modified further by James Barron, June 2004
-# Modified further by Moony, October 2007, December 2007
-#	Disclaimer: This code may look like crap and / or contain poor coding practices.
-#	            Well, you got it for free, so be happy!
+# Modified further by Moony, October 2007, December 2007, January 2008
+#
+#	Disclaimer: This code may look like crap and / or contain poor coding practices. 
+#	            (e.g. making system calls, using 81+ characters in console output on a single line, etc.)
+#	            My main goal is to make it legible and easy for me to write, not to be a perl/posix god.  ;)
+#
+# This is a modified version of sd2xc.pl found online. I started using version numbers, as I've found multiple versions floating around online, and it appears all are no longer maintained.
+#
+# Features: 
+# * Converts CursorXP themes to X11 themes 
+# * Can accept a *.CurXPTheme file as input
+# * Animations are supported 
+# * Can modify opacity 
+# * Can resize cursors
+# * Can add customized drop shadows 
+# * Can now install the theme for you
+# * Honors CursorXP "Script" options to show animation frames in any order 
+# * Creates a .tar.gz file automatically 
+# 
+# 
+# Using it: 
+# *   Method #1 (original)
+# * Extract the tar.gz file to some directory in your PATH (like /usr/bin) 
+# * Extract a *.CurXPTheme (Rename to *.zip if necessary) 
+# * Change to the directory of the extracted theme, where a Scheme.ini file is 
+# * Run: sd2xc-##.pl --help (for help, duh) 
+# * Run: sd2xc-##.pl --name theme_name --install
+# * A tar.gz file will be created inside that directory containing the X11 theme
+# * It will install to your ~/.icons folder if you use --install option.
+# * Send to grandma. She will love it! 
+#
+# *   Method #2 (fancy and new)
+# * Run: sd2xc-##.pl --install /path/to/theme.CurXPTheme
+# * A tar.gz file will be created inside the current directory containing the X11 theme
+# * You can still send to grandma if so desired.
+# 
+# Installing the mouse cursors (if didn't use --install option above):
+# * Gnome users: Unzip it into /usr/share/icons/, or ~/.icons/ . Then use gnome-appearance-properties to change cursor 
+# * KDE Users: Use "Control Center / Peripherals / Mouse / Cursor Theme" to install the tar.gz file, then re-login
+#
+# Enjoy!
+#
+#
+# Requirements:
+# Requires packages:   ImageMagick ImageMagick-perl perl-Config-IniFiles xcursorgen unzip
+#
+# Installation varies by distro.  Fedora users can do:
+#    yum install ImageMagick ImageMagick-perl perl-Config-IniFiles xcursorgen unzip
+#
+# Ubuntu users may be able to do something like:
+#    sudo apt-get install libconfig-inifiles-perl perlmagick imagemagick xcursorgen unzip
+#
+# Future plans: 
+# * Down/hold click cursor variation, if possible. (It depends on if X can switch the cursor when you click.) 
+# * Add click effects like CursorXP. Not sure if this will work, but can't hurt to try. (It depends on if X can switch the cursor when you click.)
+#
+#
+# Changelog:
+#
+#	Version 2.2.1
+#	Fixed a really obvious bug that I should have caught during testing.  I sure hope there aren't more!  ;)  Sorry bout dat!
+#	Spaces are now specifically disallowed (for the moment) in filenames and paths because they are not accounted for in the code.
+#
+#	Version 2.2
+#	Now accepts a *.curxptheme file as input!  No more PITA unzipping!  Just add the theme location to the end of the command.
+#		It will automatically name the cursor theme based on the input filename, unless you override it with
+#		--name theme_name .  (Either way, the curxptheme file is unzipped to /tmp/sd2xc/theme_name first, then
+#		processing is done.)  This adds another "temp" layer to things.  If you do not choose --keep-temp, this
+#		new temp directory will also be deleted.  *ALWAYS* run as normal user, not root!  Also, 
+#		The X11 theme .tar.gz file will be placed in the current directory if you use this method.
+#		The old method of running inside a directory still works too.
+#	Added resize option --resize which accepts an integer percent.  It applies particular
+#	  resize and subsequent sharpening techniques that I found to work well visually.
+#	Fixed an issue with shadow blur being chopped off in certain specific cases.
+#	Huge speed increase by removing some redundant processing.
+#	Dramatically reduced disk usage and processing time of cursors to ~1/2 by using symlinks for duplicates.
+#	Fixed the verbose option -v and added --verbose.  Also clarified its output.
+#	Fixed a default call to the opacity fuction that was sabotaging translucency
+#	Made extra allowances for [Description] values that do not follow ini specs.
+#	Now saves [Description] values into index.theme "Comments" section.
+#	Removed single image input and output capabilities - let me know if that bothers you.
 #
 #	Version 2.1
 #	Installation (to ~/.icons) option:  --install
@@ -25,48 +103,78 @@
 #	Added additional defaults to make all input options optional
 #	Added support for Stardock "_Scripts" ini option which allows frames
 #	  to be shown in any order
-#
-# Features: 
-# * Converts CursorXP themes to X11 themes 
-# * Animations are supported 
-# * Can add customized drop shadows 
-# * Can now install the theme for you
-# * Can modify opacity 
-# * Honors CursorXP "Script" options to show animation frames in any order 
-# * Creates a .tar.gz file automatically 
-# 
-# 
-# Using it: 
-# * Extract the tar.gz file to some directory in your PATH (like /usr/bin) 
-# * Extract a *.CurXPTheme (Rename to *.zip if necessary) 
-# * Change to the directory of the extracted theme, where a Scheme.ini file is 
-# * Run: sd2xc-##.pl --help (for help, duh) 
-# * Run: sd2xc-##.pl --name theme_name --install
-# * A tar.gz file will be created inside that directory containing the X11 theme
-# * It will install to your ~/.icons folder if you use --install option.
-# * Send to grandma. She will love it! 
-# 
-# Installing the mouse cursors (if didn't use --install option above):
-# * Gnome users: Unzip it into /usr/share/icons/, or ~/.icons/ . Then use gnome-appearance-properties to change cursor 
-# * KDE Users: Use "Control Center / Peripherals / Mouse / Cursor Theme" to install the tar.gz file, then re-login
 
-#
-# Requirements:
-# Requires packages:   ImageMagick ImageMagick-perl perl-Config-IniFiles xcursorgen
-# Installation varies by distro.  Fedora users can do:
-#    yum install ImageMagick ImageMagick-perl perl-Config-IniFiles xcursorgen
-# Ubuntu users may be able to do something like:
-#    sudo apt-get install libconfig-inifiles-perl perlmagick imagemagick xcursorgen
 
 
 use strict;
 use Image::Magick;
 use Getopt::Long;
 use Config::IniFiles;
+use File::Path;
+use Cwd;
+use File::Basename;
 
-my ($config_file, $path, $name, $tmppath, $generator, $verbose, $inherits, $tmpscheme, $shadow, $shadowopacity, $shadowx, $shadowy, $shadowblur, $shadowblursigma, $testinput, $testoutput, $opacity, $install, $nozip, $keeptemp, $printversion, $version);
+my ($config_file, $path, $name, $tmppath, $generator, $verbose, $inherits, $tmpscheme, $shadow, $shadowopacity, $shadowx, $shadowy, $shadowblur, $shadowblursigma, $testinput, $testoutput, $opacity, $install, $nozip, $keeptemp, $printversion, $version, $newsize, $rollpixels, $dummy, $comment, $curxptheme, $unzip, $basepath, $curxptmppath, $origpath);
 
 sub shadow
+{
+	my($imageref, $swidth, $sheight, $shadowblur, $shadowblursigma, $shadowx, $shadowy, $shadowopacity) = @_;
+	my ($pre_shadow,$shadow_img,$resized);
+#$$imageref->Set(type=>"TrueColorMatte");
+	$resized=Image::Magick->new(size=>$swidth."x".$sheight);
+	$resized->ReadImage('xc:transparent');
+	$resized->Set(type=>"TrueColorMatte");
+	$resized->Composite(image=>$$imageref,compose=>"Over");
+
+	#this is a template for making a shadow pixel by pixel
+	#basically, a black and white image to represent alpha channel.
+	$pre_shadow=$resized->Clone();
+	$pre_shadow->Separate(channel=>'Alpha');
+	$pre_shadow->Roll(x=>$shadowx,y=>$shadowy);
+	$pre_shadow->GaussianBlur(radius=>$shadowblur,sigma=>$shadowblursigma);
+	$pre_shadow->Negate();
+	$pre_shadow->Modulate(brightness=>$shadowopacity);
+
+	#prepare actual shadow image
+	$shadow_img=Image::Magick->new(size=>$swidth."x".$sheight);
+	$shadow_img->ReadImage('xc:black');
+	$shadow_img->Set(type=>"TrueColorMatte");
+	$shadow_img->Composite(compose=>'CopyOpacity',image=>$pre_shadow);
+
+	#compose image and shadow and write to file
+	$resized->Composite(image=>$shadow_img,compose=>'Difference');
+
+#$resized->Evaluate(value=>0.5, operator=>'Multiply', channel=>'Alpha');
+
+
+	return $resized;
+}
+
+sub opacity
+{
+	my($imageref, $opacity) = @_;
+	my $opacity_img;
+	my $factor = $opacity / 100;
+	 #$factor = 1/$factor;
+
+	$opacity_img=$$imageref->Clone(); 
+	$opacity_img->Evaluate(value=>$factor, operator=>'Multiply', channel=>'Alpha');
+
+#> # Make composite image of background and a 50 % transparent image.
+#> $image1->Composite(compose=>'over', image=>$image2, x=>0, y=>0,
+#>          opacity=>50
+
+
+#Transparent	color=>color name
+#$opacity_img->Transparent(color=>'rgba(255, 255, 255, 1.0)');
+
+
+	return $opacity_img;
+}
+
+
+# HACK - Prevents transparency darkening on images with already present transparency.  Not sure why.  Same as shadow sub but with last line commented out.
+sub fiximage
 {
 	my($imageref, $swidth, $sheight, $shadowblur, $shadowblursigma, $shadowx, $shadowy, $shadowopacity) = @_;
 	my ($pre_shadow,$shadow_img,$resized);
@@ -92,49 +200,51 @@ sub shadow
 	$shadow_img->Composite(compose=>'CopyOpacity',image=>$pre_shadow);
 
 	#compose image and shadow and write to file
-	$resized->Composite(image=>$shadow_img,compose=>'Difference');
+	#$resized->Composite(image=>$shadow_img,compose=>'Difference');
+
 
 	return $resized;
 }
-sub opacity 
-{
-	my($imageref, $opacity) = @_;
-	my $opacity_img;
-	my $factor = $opacity / 100;
 
-	$opacity_img=$$imageref->Clone(); 
-	$opacity_img->Evaluate(value=>$factor, operator=>'Multiply', channel=>'Alpha');
-
-	return $opacity_img;
+sub roundup {
+    my $n = shift;
+    return(($n == int($n)) ? $n : int($n + 1))
 }
 
+# May need some work on the hotspot 
 sub resize
 {
 	my($imageref, $factor) = @_;
 	my ($sheight, $swidth) = $$imageref->Get('height', 'width');
 	my $resized;
-	my $heightplus1 = $sheight + 1;
-	my $widthplus1 = $swidth + 1;
-	my $newwidth = int($swidth * ($factor / 100) + 2);
-	my $newheight = int($sheight * ($factor / 100)+ 2);
+	my $addpixels = roundup(2 * (($factor / 100) - 1));   # Add 2 pixels for each additional 100% of resize
+
+	$rollpixels = int($addpixels / 2);
+
+	my $heightplus1 = $sheight + $addpixels;
+	my $widthplus1 = $swidth + $addpixels;
+	my $newwidth = int($swidth * ($factor / 100) + $addpixels * 2);
+	my $newheight = int($sheight * ($factor / 100)+ $addpixels * 2);
 
 
 	$resized=Image::Magick->new(size=>$widthplus1."x".$heightplus1);
 	$resized->ReadImage('xc:transparent');
 	$resized->Set(type=>"TrueColorMatte");
 	$resized->Composite(image=>$$imageref,compose=>"Over");
-	$resized->Roll(x=>'1',y=>'1');
-
-	#prepare actual shadow image
-	#$scaled_img=$$imageref->Clone(); 
+	$resized->Roll(x=>$rollpixels,y=>$rollpixels);
 	$resized->Resize(geometry=>$newwidth."x".$newheight,filter=>'Cubic',blur=>'1.0',support=>'1');
+
+	if ($factor > 100){
+		$resized->AdaptiveSharpen(radius=>$addpixels * 2,sigma=>$addpixels * 2,channel=>'All');
+	}
 
 	return $resized;
 }
 
 # Rewrite Scheme.ini to tempfile (to number the lines) if contains "Script" information 
-# necessary because Stardock doesn't follow INI specs in this case
-# hence perl doesn't read it in properly
+# or if it contains a [Description] Section, which is necessary because Stardock 
+# and Cursor XP theme authors don't seem to follow INI specs hence perl doesn't read 
+# it in properly
 
 sub rewrite_ini {
 	my $filename = shift();
@@ -144,6 +254,8 @@ sub rewrite_ini {
 	my $atheader = 0;
 	my $inscriptheader = 0;
 	my $scriptheadercounter = 0;
+	my $indescription = 0;			# people get real non-spec compliant in [Description] it seems!
+	my $descriptioncounter = 0;
 	my $cursortitle;
 	my $cursorfile;
 	my $line;
@@ -153,17 +265,21 @@ sub rewrite_ini {
 		if ($line =~ m/^.*\[.*_Script\]\s*$/){
 			if ($atheader eq "0" ){
 				print INIOUT $line."\n";
-
 				$inscriptheader = 1;
 				$scriptheadercounter = 0;
 				$atheader = 1;
+				$indescription = 0;
 			} else {
 				die "Incorrect ini format";
 			}
+		} elsif ($line =~ m/^.*\[Description\]\s*$/){
+			print INIOUT $line."\n";
+			$indescription = 1;
+			$atheader = 1;
 		} elsif ($line =~ m/^.*\[.*\]\s*$/){
 			if ($atheader eq "0" ){
 				print INIOUT $line."\n";
-
+				$indescription = 0;
 				$inscriptheader = 0;
 				$scriptheadercounter = 0;
 				$atheader = 1;
@@ -176,6 +292,10 @@ sub rewrite_ini {
 				$scriptheadercounter = $scriptheadercounter + 1;
 				$atheader = 0;
 				
+			} elsif ($indescription eq "1"){
+				print INIOUT $descriptioncounter."=".$line."\n";
+				$descriptioncounter = $descriptioncounter + 1;
+				$atheader = 0;
 			} else {
 				print INIOUT $line."\n";
 				$atheader = 0;
@@ -195,8 +315,8 @@ sub rewrite_ini {
 
 
 # default for variables
-$version="2.1";
-$verbose=1;
+$version="2.2.1";
+$verbose=0;
 $shadow=0;
 $shadowopacity=40;
 $opacity=100;
@@ -204,44 +324,68 @@ $shadowx=6;
 $shadowy=6;
 $shadowblur=5;
 $shadowblursigma=3;
-$path="theme/";
-$tmppath="temp-sd2xc/";
+$path="theme/";				# path where the X11 theme will be written to
+$basepath="./";
+$origpath=getcwd();			# current working directory
+$curxptmppath="/tmp/sd2xc/";		# tmp path where a *.CurXPTheme will get extracted to if given
+$tmppath="temp-sd2xc/";			# tmp path where the X11 theme will be built
 $generator=`which xcursorgen`;
 $generator =~ s/\n//g;
-if ($generator !~ m/xcursorgen/){ die "No xcursorgen installed." }
+$unzip =`which unzip`;
+$unzip =~ s/\n//g;
 $testinput="";
 $testoutput="test.png";
-$name="cursor-theme";
-# it seems that recursive inheritance does not yet exist.
+$name="cursor-theme";			# default name of a cursor theme if not given, and not given a *.CurXPTheme as input
 $inherits="core";
 $install=0;
 $nozip=0;
 $keeptemp=0;
+$newsize=100;
 
 
 sub process {
-	print "Usage:\n$0 \n";
-	print "\t[-v]                         \tVerbose output\n";
-	print "\t[--name theme_name]          \tName for X11 theme being output (default = cursor-theme)\n";
+	print "Usage:\n$0 [options] [CurXPTheme filename]\n";
+	print "\t[-v | --verbose]             \tVerbose output.\n";
+	print "\t[--name theme_name]          \tName for X11 theme being output\n";
+	print "\t                             \t(default = *.CurXPTheme filename or \"cursor-theme\"\n";
+	print "\t                             \tif not provided)\n";
 	print "\t[--inherits theme]           \tInherits existing theme (default = core)\n"; 
 	print "\t[--shadow]                   \tApply a drop shadow to cursors\n"; 
 	print "\t[--shadow-x pixels]          \tDrop shadow offset horizontal (default = 6)\n"; 
 	print "\t[--shadow-y pixels]          \tDrop shadow offset vertical (default = 6)\n"; 
 	print "\t[--shadow-blur size (pixels)]\tGaussian blur size (default = 5)\n"; 
 	print "\t[--shadow-blur-sigma size]   \tGaussian blur sigma (default = 3)\n"; 
-	print "\t[--shadow-opacity 0-100]     \tOpacity of drop shadow (default = 40)\n"; 
-	print "\t[--overall-opacity 0-100]    \tOverall opacity of cursors (default = 100)\n"; 
+	print "\t[--shadow-opacity 0-100]     \tOpacity of drop shadow % (default = 40)\n"; 
+	print "\t[--overall-opacity 0-100]    \tOverall opacity of cursors % (default = 100)\n"; 
 	print "\t[--generator xcursorgen-path]\tLocation of xcursorgen (default = auto)\n"; 
+	print "\t[--unzip unzip-path]         \tLocation of unzip utility (default = auto)\n"; 
 	print "\t[--tmp temp-dir]             \tUse temporary directory (default = ./temp-sd2xc/)\n"; 
-	print "\t[--input image]\t\n"; 
-	print "\t[--output image]\t\n"; 
+	print "\t[--resize 1-300 ]            \tResize cursors % (Careful! Files grow quickly!)\n";
+	print "\t                             \t(default = 100)\n"; 
+	#print "\t[--input image]\t\n"; 
+	#print "\t[--output image]\t\n"; 
 	print "\t[--install]                  \tInstall to ~/.icons/ \n"; 
 	print "\t[--nozip]                    \tDon't Create tar.gz of theme \n"; 
 	print "\t[--keep-temp]                \tDon't delete temporary files \n"; 
 	print "\t[--version]                  \tPrint version information\n";
 	print "\t[--help]                     \tThis help information\n";
-	print "\nINFORMATION:  CursorXP themes (*.CurXPTheme) are simply zip files.  You can decompress them as such after renaming to *.zip.  Change to the directory of an extracted CursorXP theme prior to running!  There will be a Scheme.ini file there.  ";
-	print "\nRecommended to at least provide:  --name theme_name\n";
+	print "\n\tINFORMATION:  CursorXP themes (.CurXPTheme) are simply zip files.  There are two\n";
+	print "\tways you can run this script.  The first way is to decompress a .CurXPTheme somewhere,\n";
+ 	print "\tlike ~/temp/theme_name, cd to the directory, and run the script (There will be a \n";
+	print "\tScheme.ini file there).  If you use this method, it is recommended to at least provide: \n";
+	print "\t--name theme_name as an option to the script.  The second way is to simply provide the\n";
+	print "\t .CurXPTheme filename as input.  This will place a .tar.gz file of the X11 theme into the \n";
+	print "\tcurrent directory.  Use --verbose option if you are unsure about what is going on.\n";
+	print "\nExamples:\n";
+	print "\n\tDirectly converting and .tar.gz a .CurXPTheme file:\n";
+	print "\t$0 theme.CurXPTheme\n";
+	print "\n\tJust convert and install a .CurXPTheme file (don't create a .tar.gz):\n";
+	print "\t$0 --nozip --install theme.CurXPTheme\n";
+	print "\n\tDirectly converting, .tar.gz, adding shadow, renaming, and installing a .CurXPTheme file:\n";
+	print "\t$0 --name newname --shadow --install theme.CurXPTheme\n";
+	print "\n\tConverting and installing inside an unzipped .CurXPTheme directory (old way):\n";
+	print "\t$0 --name theme_name --install \n";
+	print "\n\n\tView $0 for more details!\n";
 	exit 0;
 };
 
@@ -251,8 +395,9 @@ GetOptions (
 'tmp=s'=>\$tmppath,
 'shadow'=>\$shadow,
 'v'=>\$verbose,
+'verbose'=>\$verbose,
 'generator=s'=>\$generator,
-'<>' => \&process,
+'generator=s'=>\$unzip,
 'help'=>\&process,
 'shadow-x=i'=>\$shadowx,
 'shadow-y=i'=>\$shadowy,
@@ -260,13 +405,18 @@ GetOptions (
 'shadow-blur-sigma=i'=>\$shadowblursigma,
 'shadow-opacity=i'=>\$shadowopacity,
 'overall-opacity=i'=>\$opacity,
-'input=s'=>\$testinput,
-'output=s'=>\$testoutput,
+#'input=s'=>\$testinput,
+#'output=s'=>\$testoutput,
 'install'=>\$install,
 'nozip'=>\$nozip,
 'keep-temp'=>\$keeptemp,
-'version'=>\$printversion
+'version'=>\$printversion,
+'resize=i'=>\$newsize,
+#'<>' => \&process
 );
+
+unless (-f $generator) { die "xcursorgen utility not found!";}
+unless (-f $unzip ){ die "unzip utility not found!"; }
 
 if ($printversion){
 	print "$0 \n";
@@ -274,25 +424,53 @@ if ($printversion){
 	exit 0;
 }
 
-if($name ne "")
-{
-	$path=$name . "/";
-}
 
-if($testinput ne "")
-{
-	my($image,$yoffset,$xoffset,$swidth,$sheight);
-	$image=Image::Magick->new;
-	$image->Read($testinput);
-	$swidth = $image->Get('width') + $shadowx + $shadowblur;
-	$sheight = $image->Get('height') + $shadowy + $shadowblur;
-	$image=shadow(\$image, $swidth, $sheight, $shadowblur, $shadowblursigma, $shadowx, $shadowy, $shadowopacity);
-	$image=opacity(\$image, $opacity);
-	$image->Write(filename=>$testoutput);
-
-	exit();
-}
+#if($testinput ne "")
+#{
+#	my($image,$yoffset,$xoffset,$swidth,$sheight);
+#	$image=Image::Magick->new;
+#	$image->Read($testinput);
+#	$swidth = $image->Get('width') + $shadowx + $shadowblur;
+#	$sheight = $image->Get('height') + $shadowy + $shadowblur;
+	#$image=shadow(\$image, $swidth, $sheight, $shadowblur, $shadowblursigma, $shadowx, $shadowy, $shadowopacity);
+#	$image=opacity(\$image, $opacity);
+#	$image->Write(filename=>$testoutput);
+#
+#	exit();
+#}
 	
+
+if ($ARGV[0] ne "") {
+	$curxptheme = $ARGV[0];
+
+	if ($name eq "cursor-theme"){
+		$name = $ARGV[0];
+		my $base = basename($name);
+		my $dir  = dirname($name);
+		$name = $base;
+		$name =~ s/(.*)\.curxptheme/$1/i;
+	}
+
+	unless (-f $curxptheme) {
+		print "$curxptheme not found.";
+		exit 1;
+	}
+
+	#print $name;
+	$path="/tmp/sd2xc/".$name."/".$name."/";
+	$basepath="/tmp/sd2xc/".$name."/";
+	if ($tmppath eq "temp-sd2xc/"){
+		$tmppath="$basepath"."$tmppath";	
+	}
+	if (! -d $path) {
+		mkpath ($path);
+	}
+	$dummy = `$unzip -u -d $basepath $curxptheme`
+}
+elsif($name ne "") {	
+	$path = $name."/";
+} 
+
 
 # make sure path and tmppath end in /
 if ($path =~ /[^\/]$/) {
@@ -300,6 +478,22 @@ if ($path =~ /[^\/]$/) {
 }
 if ($tmppath =~ /[^\/]$/) {
 	$tmppath=$tmppath."/";
+}
+if ($origpath =~ /[^\/]$/) {
+	$origpath=$origpath."/";
+}
+
+if ($path =~ / /) {
+	print ("Spaces in names, filenames, and paths not allowed at the moment.\n");
+	exit 1;
+}
+if ($tmppath =~ / /) {
+	print ("Spaces in names, filenames, and paths not allowed at the moment.\n");
+	exit 1;
+}
+if ($origpath =~ / /) {
+	print ("Spaces in names, filenames, and paths not allowed at the moment.\n");
+	exit 1;
 }
 
 if (! -d $path) {
@@ -313,11 +507,13 @@ if (! -d $tmppath) {
 }
 $tmpscheme=$tmppath."Scheme.ini";
 
-rewrite_ini("Scheme.ini");
+#print $basepath."Scheme.ini";
 
+rewrite_ini($basepath."Scheme.ini");
+#exit;
 
 # I did this much nicer, but Perl < 5.8 choked.
-open (INI, "< $tmpscheme.tmp") or die ("Cannot open Scheme.tmp.ini");
+open (INI, "< $tmpscheme.tmp") or die ("$tmpscheme.tmp");
 open (INF, ">", $tmpscheme);
 while (<INI>) {
 	unless (!/=/ && !/^\s*\[/) {
@@ -349,28 +545,20 @@ my $filemap={
 	NO=>["crossed_circle",'03b6e0fcb3499374a867c041f52298f0']
 };
 
-my $filemap_script={
-	Arrow_Script=>["left_ptr","X_cursor","right_ptr","top_left_arrow","move",'4498f0e0c1937ffe01fd06f973665830'],
-	Cross_Script=>["tcross","cross","crosshair","cross_reverse","draped_box"],
-	Hand_Script=>["hand","hand1", "hand2",'9d800788f1b08800ae810202380a0822','e29285e634086352946a0e7090d73106'],
-	IBeam_Script=>"xterm",
-	UpArrow_Script=>"center_ptr",
-	SizeNWSE_Script=>["bottom_right_corner","top_left_corner","bd_double_arrow","lr_angle",'c7088f0f3e6c8088236ef8e1e3e70000'],
-	SizeNESW_Script=>["bottom_left_corner","top_right_corner","fd_double_arrow","ll_angle",'fcf1c3c7cd4491d801f1e1c78f100000'],
-	SizeWE_Script=>["sb_h_double_arrow", "left_side", "right_side","h_double_arrow",'028006030e0e7ebffc7f7070c0600140','14fef782d02440884392942c11205230'],
-	SizeNS_Script=>["double_arrow","bottom_side","top_side","v_double_arrow","sb_v_double_arrow",'00008160000006810000408080010102','2870a09082c103050810ffdffffe0204'],
-	Help_Script=>["question_arrow",'d9ce0ab605698f320427677b458ad60b'],
-	Handwriting_Script=>"pencil",
-	AppStarting_Script=>["left_ptr_watch", '08e8e1c95fe2fc01f976f1e063a24ccd', '3ecb610c1bf2410f44200f48c40d3599'],
-	SizeAll_Script=>"fleur",
-	Wait_Script=>"watch",
-	NO_Script=>["crossed_circle",'03b6e0fcb3499374a867c041f52298f0']
-};
+
 
 foreach my $section (@sections) {
 	my ($filename);
 
-	$filename=$section.".png";
+	if ($section eq "Description"){
+		my $i = 1;
+		while ($cfg->val("Description", $i) ne ""){
+			$comment = $comment." ".$cfg->val("Description", $i);
+			$i = $i + 1;
+		}
+	}
+
+	$filename=$basepath.$section.".png";
 	unless (-f $filename) {
 		next;
 	}
@@ -399,158 +587,221 @@ foreach my $section (@sections) {
 		$array=0;
 	}
 
+	my $img_processed=0;
+	my $real_file="";
+	my $preoutfile="";
+
 	LOOP:
 		my $outfile;
 	
 		if ($array > -1) {
 			if (defined (@{$curout}[0])) {
-				$outfile=pop @{$curout};
+				$preoutfile=pop @{$curout};
 			} else {
 				next;
 			}
 		} else {
-			$outfile=$curout;
+			$preoutfile=$curout;
 		}
-		$outfile=$path."cursors/".$outfile;
-	
-		if ($verbose) {
-			print "Writing to $section -> $outfile\n";
-		}
-	
-		open (FH, "| $generator > \"$outfile\"");
+		$outfile=$path."cursors/".$preoutfile;
 	
 		my $yoffset = $shadowy + $shadowblur;
 		my $xoffset = $shadowx + $shadowblur;
-		my $swidth = $width + $xoffset;
-		my $sheight = $height + $yoffset;
+		my $swidth = ($width + $xoffset + $shadowblur)*$newsize/100;
+		my $sheight = ($height + $yoffset + $shadowblur)*$newsize/100;
+		$rollpixels = int(roundup(2 * (($newsize / 100) - 1)) / 2);
+		my $hotspotx = int(($cfg->val($section,'Hot spot x') + $rollpixels)*$newsize/100);
+		my $hotspoty = int(($cfg->val($section,'Hot spot y') + $rollpixels)* $newsize/100);
 
 		my $i=0;
 
-		# Process and Output images
-		for (my $i=0; $i<$frames; $i++) {
-			my ($tmpimg, $outfile);
-			$outfile=$tmppath.$section.'-'.$i.'.png';
-			$tmpimg=$image->Clone();
+		# Process and Output images if not yet done
 	
-			$x=$tmpimg->Crop(width=>$width, height=>$height, x=>$i*$width, y=>0);
-			warn "$x" if "$x";
-	
-			if ($shadow)
-			{
-				$tmpimg=shadow(\$tmpimg, $swidth, $sheight, $shadowblur, $shadowblursigma, $shadowx, $shadowy, $shadowopacity);
+
+		if ($img_processed eq "0"){
+
+			if ($verbose) {
+				print "Creating $filename\n";
 			}
-	
-			if ($opacity)
-			{
-				$tmpimg=opacity(\$tmpimg, $opacity);
-			}
+
+			$real_file = $preoutfile;
+			for (my $i=0; $i<$frames; $i++) {
+				my ($tmpimg, $outfile);
+				$outfile=$tmppath.$section.'-'.$i.'.png';
+				$tmpimg=$image->Clone();
 		
-			#$tmpimg=resize(\$tmpimg, "110");
 	
-			$x=$tmpimg->Write($outfile);
-			warn "$x" if "$x";
+				$x=$tmpimg->Crop(width=>$width, height=>$height, x=>$i*$width, y=>0);
+				warn "$x" if "$x";
+	
+				if ($newsize ne "100"){
+					$tmpimg=resize(\$tmpimg, $newsize);
+				}	
+
+				if ($opacity < 100)
+				{
+					$tmpimg=opacity(\$tmpimg, $opacity);
+				}
+	
+				if ($shadow)
+				{
+					$tmpimg=shadow(\$tmpimg, $swidth, $sheight, $shadowblur, $shadowblursigma, $shadowx, $shadowy, $shadowopacity);
+				} else {
+					# A HUGE HACK TO PREVENT TRANSPARENCY DARKENING IN IMAGES WITH TRANSPARENCY ALREADY IN THEM - NO IDEA WHY IT WORKS
+					$tmpimg=fiximage(\$tmpimg, $swidth, $sheight, $shadowblur, $shadowblursigma, $shadowx, $shadowy, $shadowopacity);
+				}
+
+	
+	
+				$x=$tmpimg->Write($outfile);
+
+			
+				warn "$x" if "$x";
+			}
 		}
+		
 	
-		# Manage the order that frames are displayed
-
-		# If there is a _Script, process as such
-		my $section_script=$section."_Script";
-		if (defined ($cfg->val($section_script, "0"))){
-			my $scripti = 0;
-			my $i = 0;
-			my $getinfo;
-			my $interval;
-			my $startframe;
-			my $endframe;
-			my $whichframes;
-
-			while ($cfg->val($section_script, $scripti) ne ""){
-				$startframe = "";
-				$endframe = "";
-
-				$getinfo=$cfg->val($section_script, $scripti);
-				($whichframes, $interval) = split (/,/ , $getinfo);
-				#print $frames." ".$interval."\n";
-
-				($startframe, $endframe) = split (/-/ , $whichframes);
-
-				if ($interval > 1000000){
-					$interval = 1000000;
+		if ($img_processed eq "0"){
+			open (FH, "| $generator > \"$outfile\"");
+			if ($verbose) {
+				print "Converting $section -> $outfile\n";
+			}
+	
+			# Manage the order that frames are displayed
+			# If there is a _Script, process as such
+			my $section_script=$section."_Script";
+			if (defined ($cfg->val($section_script, "0"))){
+				my $scripti = 0;
+				my $i = 0;
+				my $getinfo;
+				my $interval;
+				my $startframe;
+				my $endframe;
+				my $whichframes;
+	
+				while ($cfg->val($section_script, $scripti) ne ""){
+					$startframe = "";
+					$endframe = "";
+	
+					$getinfo=$cfg->val($section_script, $scripti);
+					($whichframes, $interval) = split (/,/ , $getinfo);
+					#print $frames." ".$interval."\n";
+	
+					($startframe, $endframe) = split (/-/ , $whichframes);
+	
+					if ($interval > 1000000){
+						$interval = 1000000;
+					}
+	
+					if ($endframe !~ /\d/ ){
+						$endframe = $startframe;
+					}
+	
+									
+					for (my $i=$startframe-1; $i<$endframe; $i++) {
+						my ($tmpimg, $outfile);
+						$outfile=$tmppath.$section.'-'.$i.'.png';
+	# 		
+						if (-e "$outfile"){
+							print FH "1 ".
+							$hotspotx." ".
+							$hotspoty." ".
+							$outfile." ".
+							$interval."\n";
+						}	
+						
+					}
+	
+					$scripti = $scripti + 1;
 				}
-
-				if ($endframe !~ /\d/ ){
-					$endframe = $startframe;
-				}
-
-								
-				for (my $i=$startframe-1; $i<$endframe; $i++) {
-					my ($tmpimg, $outfile);
+				
+				
+			} else {	# Otherwise do normal static or normal looping animated
+				for (my $i=0; $i<$frames; $i++) {
+					my ($outfile);
 					$outfile=$tmppath.$section.'-'.$i.'.png';
-# 		
-					if (-e "$outfile"){
-						print FH "1 ".
-						$cfg->val($section,'Hot spot x')." ".
-						$cfg->val($section,'Hot spot y')." ".
-						$outfile." ".
-						$interval."\n";
-					}	
+		
+					print FH  "1 ".
+					$hotspotx." ".
+					$hotspoty." ".
+					$outfile." ".
+					$cfg->val($section,'Interval')."\n";
+		
 					
 				}
-
-				$scripti = $scripti + 1;
 			}
-			
-			
-		} else {	# Otherwise do normal static or normal looping animated
-			for (my $i=0; $i<$frames; $i++) {
-				my ($outfile);
-				$outfile=$tmppath.$section.'-'.$i.'.png';
-	
-				print FH  "1 ".
-				$cfg->val($section,'Hot spot x')." ".
-				$cfg->val($section,'Hot spot y')." ".
-				$outfile." ".
-				$cfg->val($section,'Interval')."\n";
-	
-				
+			close (FH);
+			$img_processed=1;
+		} else {
+			if ($verbose) {
+				print "Creating symlink $outfile -> $real_file\n";
 			}
+			$dummy=`if [ -f $outfile ]; then rm $outfile; fi; ln -s $real_file $outfile`;
 		}
+		
 
 	if ($array > -1) {
 		goto LOOP;
 	}
 }
 
-print "Writing theme index file.\n";
+if ($verbose) {
+	print "Writing theme index file.\n";
+}
+
+$comment = $comment." - Converted by sd2xc-$version.pl";
+
 open (FH, "> ${path}index.theme");
 print FH <<EOF;
 [Icon Theme]
 Name=$name
+Comment=$comment
 Example=left_ptr
 Inherits=$inherits
 EOF
 close (FH);
 
-my $dummy;
+if ($verbose) {
+	print "Theme written to ${path}\n";
+}
 
 if (!$nozip){
-	$dummy = `tar cf $name.tar $name; gzip $name.tar;`;
-	print "Theme zipped into $name.tar.gz\n";
+
+	$dummy = `cd $basepath; pwd; tar cf $origpath$name.tar $name; gzip $origpath$name.tar;`;
+
+	if ($verbose) {		
+		print "Theme zipped into ./$name.tar.gz\n";
+	}
+
 }
 
 if ($install){
-	$dummy = `mkdir -p ~/.icons; cp -Rp $name ~/.icons/;`;
-	print "Theme installed into ~/.icons/\n";
+
+	$dummy = `mkdir -p ~/.icons; cp -Rp $basepath$name ~/.icons/;`;
+	if ($verbose) {	
+		print "Theme installed into ~/.icons/\n";
+	}
 }
 
 if (!$keeptemp){
-	$dummy = `rm -r $tmppath`;
-	print "Removed temp directory $tmppath\n";
+	if ($ARGV[0] ne ""){
+		$dummy = `rm -r $basepath`;
+		if ($verbose) {	
+			print "Removed temp directory $basepath\n";
+		}
+	} else {
+		$dummy = `rm -r $tmppath`;
+		if ($verbose) {
+			print "Removed temp directory $tmppath\n";
+		}
+	}
+
 }
 
+if ($verbose) {
+	print "Done.\n";
+}
 
-print "Theme written to ${path}\n";
-print "Done.\n";
 
 
 
