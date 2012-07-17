@@ -4,8 +4,20 @@
 # Licensed under the MIT license.
 # Modified by Nicholas Petreley, March 2003
 # Modified further by James Barron, June 2004
-# Modified further by Moony, October, December 2007
-#	This code may look like crap.  Well, you got it for free so be happy!
+# Modified further by Moony, October 2007, December 2007
+#	Disclaimer: This code may look like crap and / or contain poor coding practices.
+#	            Well, you got it for free, so be happy!
+#
+#	Version 2.1
+#	Installation (to ~/.icons) option:  --install
+#	Added option to not create tar.gz of theme:  --nozip
+#	Added option to keep temporary files:  --keep-temp
+#	Reworked the --help option to give a better display and more info
+#	Fixed some issues with ini rewriting
+#	Added native version identifier
+#	Renamed default temp directory to something less scary to delete (was tmp)
+#
+#	Version 2.0
 #	Started using version numbers, for my own sake. Sorry.  ;)
 #	Fixed shadow algorithm (how come nobody fixed it sooner??!)
 #	Automatically creates a .tar.gz file of X11 cursors.
@@ -14,36 +26,45 @@
 #	Added support for Stardock "_Scripts" ini option which allows frames
 #	  to be shown in any order
 #
-#
-# Features:
-# * Converts CursorXP themes to X11 Themes.
-# * Can add customzied drop shadows
-# * Can modify opacity
-# * Honors CursorXP "Script" options
-# * Creates a .tar.gz file automatically.
+# Features: 
+# * Converts CursorXP themes to X11 themes 
+# * Animations are supported 
+# * Can add customized drop shadows 
+# * Can now install the theme for you
+# * Can modify opacity 
+# * Honors CursorXP "Script" options to show animation frames in any order 
+# * Creates a .tar.gz file automatically 
 # 
 # 
-# Using it:
-# * Extract the tar.gz file to some directory in your PATH (like /usr/bin). 
-# * Extract a *.CurXPTheme. (Rename to *.zip if necessary)
-# * Change to the directory of the extracted theme, where a Scheme.ini file is.
-# * Run: sd2xc-##.pl --name theme_name
-# * A tar.gz file will be created inside that directory containing the X11 theme.
-# * Send to grandma
-# * Gnome users: Unzip it into /usr/share/icons/, or ~/.icons/
-# * KDE Users: Use "Control Center / Peripherals / Mouse / Cursor Theme" to install the tar.gz file.
+# Using it: 
+# * Extract the tar.gz file to some directory in your PATH (like /usr/bin) 
+# * Extract a *.CurXPTheme (Rename to *.zip if necessary) 
+# * Change to the directory of the extracted theme, where a Scheme.ini file is 
+# * Run: sd2xc-##.pl --help (for help, duh) 
+# * Run: sd2xc-##.pl --name theme_name --install
+# * A tar.gz file will be created inside that directory containing the X11 theme
+# * It will install to your ~/.icons folder if you use --install option.
+# * Send to grandma. She will love it! 
+# 
+# Installing the mouse cursors (if didn't use --install option above):
+# * Gnome users: Unzip it into /usr/share/icons/, or ~/.icons/ . Then use gnome-appearance-properties to change cursor 
+# * KDE Users: Use "Control Center / Peripherals / Mouse / Cursor Theme" to install the tar.gz file, then re-login
 
+#
+# Requirements:
 # Requires packages:   ImageMagick ImageMagick-perl perl-Config-IniFiles xcursorgen
 # Installation varies by distro.  Fedora users can do:
 #    yum install ImageMagick ImageMagick-perl perl-Config-IniFiles xcursorgen
-# Ubuntu users may be able to do something like (unsure):
-#    sudo apt-get ImageMagick ImageMagick-perl perl-Config-IniFiles xcursorgen
+# Ubuntu users may be able to do something like:
+#    sudo apt-get install libconfig-inifiles-perl perlmagick imagemagick xcursorgen
 
 
 use strict;
 use Image::Magick;
 use Getopt::Long;
 use Config::IniFiles;
+
+my ($config_file, $path, $name, $tmppath, $generator, $verbose, $inherits, $tmpscheme, $shadow, $shadowopacity, $shadowx, $shadowy, $shadowblur, $shadowblursigma, $testinput, $testoutput, $opacity, $install, $nozip, $keeptemp, $printversion, $version);
 
 sub shadow
 {
@@ -113,12 +134,12 @@ sub resize
 
 # Rewrite Scheme.ini to tempfile (to number the lines) if contains "Script" information 
 # necessary because Stardock doesn't follow INI specs in this case
-# hence perl can't read it in properly
+# hence perl doesn't read it in properly
 
 sub rewrite_ini {
 	my $filename = shift();
 	open(INI, $filename) or die "Could not open Scheme.ini file: $!";
-	open(INIOUT, ">Scheme.ini.tmp.ini"); #open for write, overwrite
+	open(INIOUT, ">$tmpscheme.tmp"); #open for write, overwrite
 
 	my $atheader = 0;
 	my $inscriptheader = 0;
@@ -151,7 +172,7 @@ sub rewrite_ini {
 			}
 		} elsif ($line !~ m/^\s*$/){
 			if ($inscriptheader eq "1"){
-				print INIOUT $scriptheadercounter."=".$line;
+				print INIOUT $scriptheadercounter."=".$line."\n";
 				$scriptheadercounter = $scriptheadercounter + 1;
 				$atheader = 0;
 				
@@ -172,9 +193,9 @@ sub rewrite_ini {
 
                                                                                                                                                                              
 
-my ($config_file, $path, $name, $tmppath, $generator, $verbose, $inherits, $tmpscheme, $shadow, $shadowopacity, $shadowx, $shadowy, $shadowblur, $shadowblursigma, $testinput, $testoutput, $opacity);
 
 # default for variables
+$version="2.1";
 $verbose=1;
 $shadow=0;
 $shadowopacity=40;
@@ -184,7 +205,7 @@ $shadowy=6;
 $shadowblur=5;
 $shadowblursigma=3;
 $path="theme/";
-$tmppath="tmp/";
+$tmppath="temp-sd2xc/";
 $generator=`which xcursorgen`;
 $generator =~ s/\n//g;
 if ($generator !~ m/xcursorgen/){ die "No xcursorgen installed." }
@@ -193,12 +214,34 @@ $testoutput="test.png";
 $name="cursor-theme";
 # it seems that recursive inheritance does not yet exist.
 $inherits="core";
+$install=0;
+$nozip=0;
+$keeptemp=0;
 
 
 sub process {
-	print "\nUsage:\n$0 [-v] [--name theme_name] [--inherits theme] [--shadow] [--shadow-x pixels] [--shadow-y pixels] [--shadow-blur size (pixels)] [--shadow-blur-sigma size] [--shadow-opacity 0-100] [--overall-opacity 0-100] [--generator xcursorgen-path] [--tmp temp-dir] [--input image] [--output image] [--help]";
-	print "\n\nINFORMATION:  CursorXP themes (*.CurXPTheme) are simply zip files.  You can decompress them as such after renaming to *.zip.  Change to the directory of an extracted CursorXP theme prior to running!  There will be a Scheme.ini file there.  ";
-	print "\n\nRecommended to at least provide:  --name theme_name\n";
+	print "Usage:\n$0 \n";
+	print "\t[-v]                         \tVerbose output\n";
+	print "\t[--name theme_name]          \tName for X11 theme being output (default = cursor-theme)\n";
+	print "\t[--inherits theme]           \tInherits existing theme (default = core)\n"; 
+	print "\t[--shadow]                   \tApply a drop shadow to cursors\n"; 
+	print "\t[--shadow-x pixels]          \tDrop shadow offset horizontal (default = 6)\n"; 
+	print "\t[--shadow-y pixels]          \tDrop shadow offset vertical (default = 6)\n"; 
+	print "\t[--shadow-blur size (pixels)]\tGaussian blur size (default = 5)\n"; 
+	print "\t[--shadow-blur-sigma size]   \tGaussian blur sigma (default = 3)\n"; 
+	print "\t[--shadow-opacity 0-100]     \tOpacity of drop shadow (default = 40)\n"; 
+	print "\t[--overall-opacity 0-100]    \tOverall opacity of cursors (default = 100)\n"; 
+	print "\t[--generator xcursorgen-path]\tLocation of xcursorgen (default = auto)\n"; 
+	print "\t[--tmp temp-dir]             \tUse temporary directory (default = ./temp-sd2xc/)\n"; 
+	print "\t[--input image]\t\n"; 
+	print "\t[--output image]\t\n"; 
+	print "\t[--install]                  \tInstall to ~/.icons/ \n"; 
+	print "\t[--nozip]                    \tDon't Create tar.gz of theme \n"; 
+	print "\t[--keep-temp]                \tDon't delete temporary files \n"; 
+	print "\t[--version]                  \tPrint version information\n";
+	print "\t[--help]                     \tThis help information\n";
+	print "\nINFORMATION:  CursorXP themes (*.CurXPTheme) are simply zip files.  You can decompress them as such after renaming to *.zip.  Change to the directory of an extracted CursorXP theme prior to running!  There will be a Scheme.ini file there.  ";
+	print "\nRecommended to at least provide:  --name theme_name\n";
 	exit 0;
 };
 
@@ -218,8 +261,18 @@ GetOptions (
 'shadow-opacity=i'=>\$shadowopacity,
 'overall-opacity=i'=>\$opacity,
 'input=s'=>\$testinput,
-'output=s'=>\$testoutput
+'output=s'=>\$testoutput,
+'install'=>\$install,
+'nozip'=>\$nozip,
+'keep-temp'=>\$keeptemp,
+'version'=>\$printversion
 );
+
+if ($printversion){
+	print "$0 \n";
+	print "\tVersion: $version\n";
+	exit 0;
+}
 
 if($name ne "")
 {
@@ -264,7 +317,7 @@ rewrite_ini("Scheme.ini");
 
 
 # I did this much nicer, but Perl < 5.8 choked.
-open (INI, "< Scheme.ini.tmp.ini") or die ("Cannot open Scheme.ini.tmp");
+open (INI, "< $tmpscheme.tmp") or die ("Cannot open Scheme.tmp.ini");
 open (INF, ">", $tmpscheme);
 while (<INI>) {
 	unless (!/=/ && !/^\s*\[/) {
@@ -468,7 +521,7 @@ foreach my $section (@sections) {
 	}
 }
 
-print "Writing theme index.\n";
+print "Writing theme index file.\n";
 open (FH, "> ${path}index.theme");
 print FH <<EOF;
 [Icon Theme]
@@ -479,6 +532,33 @@ EOF
 close (FH);
 
 my $dummy;
-$dummy = `tar cf $name.tar $name; gzip $name.tar;`;
 
-print "Done. Theme written to ${path}\n";
+if (!$nozip){
+	$dummy = `tar cf $name.tar $name; gzip $name.tar;`;
+	print "Theme zipped into $name.tar.gz\n";
+}
+
+if ($install){
+	$dummy = `mkdir -p ~/.icons; cp -Rp $name ~/.icons/;`;
+	print "Theme installed into ~/.icons/\n";
+}
+
+if (!$keeptemp){
+	$dummy = `rm -r $tmppath`;
+	print "Removed temp directory $tmppath\n";
+}
+
+
+print "Theme written to ${path}\n";
+print "Done.\n";
+
+
+
+
+
+
+
+
+
+
+
